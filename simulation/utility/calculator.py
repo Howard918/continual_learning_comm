@@ -10,9 +10,9 @@ def get_max_v(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h):
     t_z = dted_data["grid_height"][t_iy][t_ix]
     r_x, r_y = to_utm(dted_data["grid_lon"][r_ix], dted_data["grid_lat"][r_iy])
     r_z = dted_data["grid_height"][r_iy][r_ix]
-    distance = sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)
+    distance = np.sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)
                     * (t_y-r_y) + (t_z + t_h - r_z - r_h) * (t_z + t_h - r_z - r_h))
-    D = sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y))
+    D = np.sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y))
     DZ = r_z + r_h - t_z - t_h
 
     # v_info : {"v": float, "h': float, "d1": float, "d2": float}
@@ -21,7 +21,7 @@ def get_max_v(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h):
         x, y = to_utm(dted_data["grid_lon"][dot[0]],
                       dted_data["grid_lat"][dot[1]])
         z = dted_data["grid_height"][dot[1]][dot[0]]
-        d = sqrt((x-t_x) * (x-t_x) + (y-t_y)*(y-t_y))
+        d = np.sqrt((x-t_x) * (x-t_x) + (y-t_y)*(y-t_y))
         lz = t_z + t_h + DZ / D * d
         v = get_v_factor(z-lz, f, d, D-d)
         if np.isnan(v):
@@ -56,7 +56,7 @@ def get_observer_predicted_v(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h):
         x, y = to_utm(dted_data["grid_lon"][dot[0]],
                       dted_data["grid_lat"][dot[1]])
         z = dted_data["grid_height"][dot[1]][dot[0]]
-        d2 = sqrt((x-r_x) * (x-r_x) + (y-r_y)*(y-r_y))
+        d2 = np.sqrt((x-r_x) * (x-r_x) + (y-r_y)*(y-r_y))
         if d2==0:
             print(x,r_x,y,r_y)
         tan_value =  (z - r_z)/d2
@@ -67,7 +67,7 @@ def get_observer_predicted_v(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h):
     x, y = to_utm(dted_data["grid_lon"][max_angle_dot[0]],
                       dted_data["grid_lat"][max_angle_dot[1]])
     z = dted_data["grid_height"][max_angle_dot[1]][max_angle_dot[0]]
-    d2 = sqrt((x-r_x)*(x-r_x)+(y-r_y)*(y-r_y))
+    d2 = np.sqrt((x-r_x)*(x-r_x)+(y-r_y)*(y-r_y))
     lz = DZ/D*(D-d2) + t_z
     h = z - lz
     v = get_v_factor(h,f,D-d2,d2)
@@ -82,7 +82,7 @@ def get_observer_predicted_power(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h)
     t_z = dted_data["grid_height"][t_iy][t_ix] + t_h
     r_x, r_y = to_utm(dted_data["grid_lon"][r_ix], dted_data["grid_lat"][r_iy])
     r_z = dted_data["grid_height"][r_iy][r_ix] + r_h
-    D = sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y))
+    D = np.sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y))
     DZ = r_z-t_z
 
     # v_info : {"v": float, "h': float, "d1": float, "d2": float}
@@ -93,7 +93,7 @@ def get_observer_predicted_power(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h)
         x, y = to_utm(dted_data["grid_lon"][dot[0]],
                       dted_data["grid_lat"][dot[1]])
         z = dted_data["grid_height"][dot[1]][dot[0]]
-        d2 = sqrt((x-r_x) * (x-r_x) + (y-r_y)*(y-r_y))
+        d2 = np.sqrt((x-r_x) * (x-r_x) + (y-r_y)*(y-r_y))
         if d2==0:
             print(x,r_x,y,r_y)
         tan_value =  (z - r_z)/d2
@@ -104,7 +104,7 @@ def get_observer_predicted_power(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h)
     x, y = to_utm(dted_data["grid_lon"][max_angle_dot[0]],
                       dted_data["grid_lat"][max_angle_dot[1]])
     z = dted_data["grid_height"][max_angle_dot[1]][max_angle_dot[0]]
-    d2 = sqrt((x-r_x)*(x-r_x)+(y-r_y)*(y-r_y))
+    d2 = np.sqrt((x-r_x)*(x-r_x)+(y-r_y)*(y-r_y))
     lz = DZ/D*(D-d2) + t_z
     h = z - lz
     v = get_v_factor(h,f,D-d2,d2)
@@ -117,7 +117,7 @@ def get_friis_power(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h):
     r_x, r_y = to_utm(dted_data["grid_lon"][r_ix], dted_data["grid_lat"][r_iy])
     t_z = dted_data["grid_height"][t_iy][t_ix] + t_h
     r_z = dted_data["grid_height"][r_iy][r_ix] + r_h
-    D = sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y) + (t_z-r_z)*(t_z-r_z))
+    D = np.sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y) + (t_z-r_z)*(t_z-r_z))
     return get_friis_gain(f,D)
 
 def get_info_about_observer_predicted_power(dted_data, t_ix, t_iy, t_h, r_ix, r_iy, r_h):
@@ -129,7 +129,7 @@ def get_info_about_observer_predicted_power(dted_data, t_ix, t_iy, t_h, r_ix, r_
     t_z = dted_data["grid_height"][t_iy][t_ix] + t_h
     r_x, r_y = to_utm(dted_data["grid_lon"][r_ix], dted_data["grid_lat"][r_iy])
     r_z = dted_data["grid_height"][r_iy][r_ix] + r_h
-    R = sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y))
+    R = np.sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y))
 
     # v_info : {"v": float, "h': float, "d1": float, "d2": float}
     tan_value_list = []
@@ -139,7 +139,7 @@ def get_info_about_observer_predicted_power(dted_data, t_ix, t_iy, t_h, r_ix, r_
         x, y = to_utm(dted_data["grid_lon"][dot[0]],
                       dted_data["grid_lat"][dot[1]])
         z = dted_data["grid_height"][dot[1]][dot[0]]
-        d2 = sqrt((x-r_x) * (x-r_x) + (y-r_y)*(y-r_y))
+        d2 = np.sqrt((x-r_x) * (x-r_x) + (y-r_y)*(y-r_y))
         if d2==0:
             print(x,r_x,y,r_y)
         tan_value =  (z - r_z)/d2
@@ -150,7 +150,7 @@ def get_info_about_observer_predicted_power(dted_data, t_ix, t_iy, t_h, r_ix, r_
     x, y = to_utm(dted_data["grid_lon"][max_angle_dot[0]],
                       dted_data["grid_lat"][max_angle_dot[1]])
     z = dted_data["grid_height"][max_angle_dot[1]][max_angle_dot[0]]
-    D = sqrt((x-r_x)*(x-r_x) + (y-r_y)*(y-r_y))
+    D = np.sqrt((x-r_x)*(x-r_x) + (y-r_y)*(y-r_y))
     H = z - r_z
     return {"R":R, "D":D, "H":H}
 
@@ -159,7 +159,7 @@ def get_received_power(dted_data, f, t_ix, t_iy, t_h, r_ix, r_iy, r_h):
         return np.nan
     t_x, t_y = to_utm(dted_data["grid_lon"][t_ix], dted_data["grid_lat"][t_iy])
     r_x, r_y = to_utm(dted_data["grid_lon"][r_ix], dted_data["grid_lat"][r_iy])
-    D = sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y))
+    D = np.sqrt((t_x-r_x)*(t_x-r_x) + (t_y-r_y)*(t_y-r_y))
 
     dots_in_line = get_dots_in_line(t_ix, t_iy, r_ix, r_iy)
     dot_list = []
@@ -184,13 +184,13 @@ def get_deygout_loss(f,dot_list):
     DX = dot_list[len(dot_list)-1]["x"] - dot_list[0]["x"]
     DY = dot_list[len(dot_list)-1]["y"] - dot_list[0]["y"]
     DZ = dot_list[len(dot_list)-1]["z"] - dot_list[0]["z"]
-    D = sqrt(DX*DX+DY*DY)
+    D = np.sqrt(DX*DX+DY*DY)
 
     v_list = []
     for i, dot in enumerate(dot_list):
         if i==0 or i==len(dot_list)-1:
             continue
-        d = sqrt((dot["x"]-TX) * (dot["x"]-TX) + (dot["y"]-TY)*(dot["y"]-TY))
+        d = np.sqrt((dot["x"]-TX) * (dot["x"]-TX) + (dot["y"]-TY)*(dot["y"]-TY))
         lz = DZ/D*d + TZ
         h = dot["z"] - lz
         v = get_v_factor(h,f,d,D-d)

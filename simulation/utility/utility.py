@@ -92,33 +92,33 @@ def get_friis_gain(f, r):
     try:
         return 10 * log10(c*c/((4*pi*r*f) * (4*pi*r*f)))
     except Exception:
-        return np.NaN
+        return np.nan
 
 def get_v_factor(h, f, d1, d2):
     if h == 0:
         return -1
     try:
-        return h * sqrt(2*f*(d1+d2)/(c*d1*d2))
+        return h * np.sqrt(2*f*(d1+d2)/(c*d1*d2))
     except Exception:
-        return np.NaN
+        return np.nan
 
 def get_loss_by_knife_edge(v):
     try:
         if v > -0.78:
-            loss = 6.9 + 20 * log10(sqrt((v-0.1)*(v-0.1)+1) + v - 0.1)
+            loss = 6.9 + 20 * log10(np.sqrt((v-0.1)*(v-0.1)+1) + v - 0.1)
             return loss
         else:
             return 0
 
     except Exception:
-        return np.NaN
+        return np.nan
 
 def get_received_power_using_r(f,r,v):
     try:
         loss = get_loss_by_knife_edge(v)
         return get_friis_gain(f, r) - loss
     except Exception:
-        return np.NaN
+        return np.nan
 
 def get_received_power_using_raw_data(f, r, h, d1, d2):
     try:
@@ -126,4 +126,4 @@ def get_received_power_using_raw_data(f, r, h, d1, d2):
         loss = get_loss_by_knife_edge(v)
         return get_friis_gain(f, r) - loss
     except Exception:
-        return np.NaN
+        return np.nan

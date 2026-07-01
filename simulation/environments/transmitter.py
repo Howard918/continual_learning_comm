@@ -27,6 +27,11 @@ test_transmitters = [
     gist_transmitter
 ]
 
+new_transmitters = [
+    Transmitter("KoreaTechUniv",127.28042984266868, 36.76551001815611),
+    Transmitter("CheonAn",127.11373740504982, 36.81449133830104)
+]
+
 
 all_transmitters = transmitters + test_transmitters
 

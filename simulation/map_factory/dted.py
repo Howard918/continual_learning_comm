@@ -36,8 +36,8 @@ def get_local_dted(t_lon=127.3845, t_lat=36.3504, span_lon=1.0, span_lat=1.0):
     ndx_lat = np.nonzero(
         np.abs(dted_data["grid_lat"]-Tx_lat).ravel() < span_lat/2)
 
-    return {"grid_lon": dted_data["grid_lon"][ndx_lon],
-            "grid_lat": dted_data["grid_lat"][ndx_lat],
+    return {"grid_lon": dted_data["grid_lon"][ndx_lon].ravel(),
+            "grid_lat": dted_data["grid_lat"][ndx_lat].ravel(),
             "grid_height": dted_data["grid_height"][np.min(ndx_lat):np.max(ndx_lat)+1,
                                                     np.min(ndx_lon):np.max(ndx_lon)+1]}
 

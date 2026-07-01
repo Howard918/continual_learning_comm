@@ -6,7 +6,7 @@ from utility.utility import convert_to_si
 
 r_h = 10
 
-def create_CSV(transmitters, frequency_list):
+def create_CSV(transmitters, frequency_list, save_path='MLP/DATA/data.csv'):
     df = pd.DataFrame(
         {"R": [], "D": [], "H": [], "RP": []})
     for transmitter in transmitters:
@@ -31,5 +31,11 @@ def create_CSV(transmitters, frequency_list):
             # df.to_csv("MLP/DATA/data.csv")
     df_shuffled = df.sample(frac=1).reset_index(drop=True)
     print("CSV DATA IS CREATED")
-    df_shuffled.to_csv("MLP/DATA/data.csv")
+    if save_path is not None:
+        df_shuffled.to_csv(save_path)
+    return df_shuffled
 
+
+from environments.transmitter import all_transmitters
+if __name__ == "__main__":
+    create_CSV(all_transmitters, [100000000])
