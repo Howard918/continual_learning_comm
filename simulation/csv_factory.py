@@ -38,4 +38,4 @@ def create_CSV(transmitters, frequency_list, save_path='MLP/DATA/data.csv'):
 
 from environments.transmitter import all_transmitters
 if __name__ == "__main__":
-    create_CSV(all_transmitters, [100000000])
+    create_CSV(all_transmitters, [100_000_000])

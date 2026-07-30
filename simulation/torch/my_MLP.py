@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 import pandas as pd
 from torch.utils.data import DataLoader, TensorDataset
+import my_loss_function as mlf
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
@@ -61,7 +63,7 @@ y_val = torch.tensor(y_val, dtype=torch.float32).unsqueeze(1)
 dataset_train = TensorDataset(X_train, y_train)
 dataloader_train = DataLoader(dataset_train, batch_size=32, shuffle=True)
 
-criterion = nn.MSELoss()
+criterion = mlf.MyLossFunction()
 
 if train_need:
     model = MyMLP(input_dim=4, hidden_dim=64, output_dim=1)
