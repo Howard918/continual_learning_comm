@@ -1,0 +1,9 @@
+Stage,Task,MSE,RMSE(dBm),MAE(dBm)
+0,Seoul.csv,69.7477,8.3515,6.4926
+1,GanNeung.csv,58.7309,7.6636,5.9439
+2,DaeJun.csv,64.0978,8.0061,6.2156
+3,CheongJu.csv,51.9263,7.2060,5.6605
+4,ChungJu.csv,64.8562,8.0533,6.5718
+5,DaeGu.csv,64.5285,8.0330,6.4106
+6,JeonJu.csv,55.2204,7.4310,5.8373
+7,JeonNam_GwangJu.csv,68.7470,8.2914,6.6298

@@ -191,7 +191,7 @@ def get_csv_map(f, t_h=10, r_h=10, t_lon=127.3845, t_lat=36.3504, span_lon=1.0, 
         D_all.append(D_row)
         H_all.append(H_row)
         print_process(r_iy, len(dted_data["grid_lat"]))
-    return {"RP": RP_all, "R": R_all, "D": D_all, "H": H_all}
+    return {"PL": RP_all, "R": R_all, "D": D_all, "H": H_all}
 
 def get_predicted_power_map(f, t_h=10, r_h=10, t_lon=127.3845, t_lat=36.3504, span_lon=1.0, span_lat=1.0):
     dted_data = get_local_dted(t_lon, t_lat, span_lon, span_lat)
