@@ -38,9 +38,9 @@ VAL_SIZE         = 0.2     # train 내부에서 val로 떼어낼 비율
 TEST_SIZE        = 0.2     # 전체 데이터에서 test로 떼어낼 비율
 
 USE_REPLAY = True
-USE_LARS   = False
+USE_LARS   = True
 USE_SCALING = True
-
+                                                                            
 date = datetime.datetime.now()
 date = date.strftime("%y%m%d_%H%M")
 
@@ -52,7 +52,7 @@ device = get_device()
 #     스케일러가 태스크마다 새로 fit되므로, 버퍼에 "그때그때 스케일링된 값"을
 #     저장해두면 서로 다른 기준으로 정규화된 값들이 뒤섞이게 됩니다.
 #     raw로 저장해두고, 사용 시점(매 태스크)의 스케일러로 그때그때
-#    即석 변환해서 사용하는 방식으로 이 문제를 피합니다.
+#     즉석 변환해서 사용하는 방식으로 이 문제를 피합니다.
 memory_x:       List[torch.Tensor] = []   # raw feature
 memory_y:       List[torch.Tensor] = []   # target (스케일링 대상 아님)
 memory_teacher: List[torch.Tensor] = []   # teacher 예측값 (target-space, 스케일링 대상 아님)
@@ -111,6 +111,9 @@ task_configs: List[Tuple] = [
     (CMB_DaeJeon, freq, "CMB_DaeJeon.csv"),
     (MBC_ChungJu, freq, "MBC_ChungJu.csv"),
     (KBS_ChungJu, freq, "KBS_ChungJu.csv"),
+    (KBS_main, freq, "KBS_main.csv"),
+    (SBS, freq, "SBS.csv"),
+    (MBC_sa, freq, "MBC_sa.csv"),
     (KBS_KangNeung, freq, "KBS_KangNeung.csv"),
     (MBC_KangNeung, freq, "MBC_KangNeung.csv"),
     (TBN_DaeGu, freq, "TBN_DaeGu.csv"),
@@ -267,6 +270,10 @@ def fit_task_scaler(current_raw_features: np.ndarray) -> Optional[MinMaxScaler]:
     """
     이번 태스크의 current raw feature와, 이 시점 리플레이 버퍼에 쌓여있는
     replay raw feature를 하나로 합쳐서 MinMaxScaler를 fit합니다.
+
+    - use_scaling=False 이면 스케일링을 전혀 적용하지 않고 None을 반환합니다.
+      (None이 전달되면 이후 모든 transform 지점에서 raw 값을 그대로 사용합니다.)
+    - 버퍼가 비어있는 첫 태스크에서는 current raw만으로 fit됩니다.
     """
     if not USE_SCALING:
         return None
@@ -401,17 +408,21 @@ def train_epoch(data_loader, optimizer) -> float:
         optimizer.zero_grad()
         Y_pred = model(X)   # ← 모델 입력은 항상 X(스케일링된 값, 또는 스케일링 비활성 시 raw)
 
-        cur_mask = ~is_rep
         cur_loss_per_sample = lfn.MSE_loss_per_sample(Y_pred, Y)  # (B,)
+        # ── [버그 수정] current + replay 전체를 "정답(Y)" 기준으로 지도학습 ──
+        loss_batch = lfn.MSE_loss(Y_pred, Y)
 
-        if USE_REPLAY and is_rep.any() and cur_mask.any():
-            # current 샘플 loss
-            cur_loss = lfn.MSE_loss(Y_pred[cur_mask], Y[cur_mask])
-            # replay 샘플 loss: 현재 모델 예측 vs 정답
-            rep_loss = lfn.MSE_loss(Y_pred[is_rep],  Y[is_rep])
-            total_loss_batch = cur_loss + LAMBDA * rep_loss
+        # ── [버그 수정] rep_loss는 반드시 replay 샘플만 골라서 계산해야 합니다.
+        #    Y_t는 current 샘플에서 torch.zeros_like(y)로 채워진 자리표시자이므로,
+        #    마스킹 없이 배치 전체로 계산하면 current 샘플의 예측이 이유 없이
+        #    0으로 끌려가는 오염된 gradient가 발생합니다. (버퍼가 채워지는
+        #    두 번째 태스크부터 이 문제가 나타나 loss가 튀어 오르고,
+        #    이후 특정 수준에서 정체되는 원인이었습니다.)
+        if USE_REPLAY and is_rep.any():
+            rep_loss = lfn.MSE_loss(Y_pred[is_rep], Y_t[is_rep])   # replay 샘플만 선택
+            total_loss_batch = loss_batch + LAMBDA * rep_loss
         else:
-            total_loss_batch = lfn.MSE_loss(Y_pred, Y)
+            total_loss_batch = loss_batch
 
         teacher = Y_pred.detach().clone()
 
@@ -419,10 +430,6 @@ def train_epoch(data_loader, optimizer) -> float:
         clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
-        # ── [요청 2] 버퍼에는 X(스케일링된 값)이 아닌 X_raw(원본)를 저장 ──
-        #     current/replay origin 여부와 무관하게, 항상 그 샘플의 raw
-        #     값을 저장합니다. (replay origin 샘플이 reservoir sampling에
-        #     의해 다시 선택되는 경우도, 원래 raw 값 그대로 보존됩니다.)
         for i in range(X.size(0)):
             add_buffer(
                 X_raw[i].detach().cpu(),
@@ -454,81 +461,129 @@ def compute_avg_loss(loader: DataLoader) -> float:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 태스크별 loss curve 시각화
+# [수정] 학습 순서에 따른 "연속" train/val loss curve 시각화
 # ════════════════════════════════════════════════════════════════════
-def plot_task_history(task_name: str, train_losses: List[float], val_losses: List[float]):
+#     기존에는 태스크(지역)별로 각각 별도의 PNG 이미지를 생성했지만,
+#     이제는 지역별 개별 이미지를 만들지 않고, 모든 태스크를 학습한
+#     "순서 그대로" epoch을 이어붙여 하나의 그래프에 담습니다.
+#
+#     예) Task A가 200epoch, Task B가 200epoch이라면
+#         global_epoch 1~200   → Task A
+#         global_epoch 201~400 → Task B
+#     로 이어지는 하나의 연속된 x축을 사용하고, 각 태스크의 경계에는
+#     점선과 태스크 이름을 표시해 "어디서부터 어느 태스크인지" 구분만
+#     시각적으로 돕습니다. (별도 이미지 파일을 만드는 것이 아니라
+#     같은 하나의 그래프 안에 표시만 되는 것입니다.)
+def plot_continuous_training_curve(history_all: Dict[str, Dict[str, List[float]]]):
     """
-    한 태스크의 epoch별 train loss / val loss 를 하나의 그래프로 저장합니다.
+    history_all 은 태스크가 학습된 순서대로 삽입되므로 (Python dict는
+    삽입 순서를 보존합니다), 이 순서를 그대로 global_epoch 축으로
+    이어붙여 하나의 연속 곡선을 그립니다.
     """
-    epochs = range(1, len(train_losses) + 1)
+    task_names = list(history_all.keys())
+    if not task_names:
+        return
 
-    plt.figure(figsize=(8, 5))
-    plt.plot(epochs, train_losses, label=L("Train Loss", "Train Loss"),
-             color="steelblue", marker='o', markersize=3)
-    plt.plot(epochs, val_losses, label=L("Val Loss", "Val Loss"),
-             color="orangered", marker='x', markersize=3)
-    plt.xlabel(L("Epoch", "Epoch"))
+    all_train, all_val, all_task_col, all_epoch_in_task = [], [], [], []
+    boundaries = []   # 각 태스크가 시작되는 global_epoch 위치 (경계선 표시용)
+    cursor = 0
+
+    for task_name in task_names:
+        train_losses = history_all[task_name]["train"]
+        val_losses   = history_all[task_name]["val"]
+
+        boundaries.append((cursor, task_name))
+        for i, (tr, vl) in enumerate(zip(train_losses, val_losses), start=1):
+            all_train.append(tr)
+            all_val.append(vl)
+            all_task_col.append(task_name)
+            all_epoch_in_task.append(i)
+        cursor += len(train_losses)
+
+    global_epoch = list(range(1, len(all_train) + 1))
+
+    # ── 그래프 (지역별로 나누지 않고 전체 학습 순서 하나로) ──────────
+    plt.figure(figsize=(max(10, len(global_epoch) / 40), 6))
+    plt.plot(global_epoch, all_train, label=L("Train Loss", "Train Loss"),
+             color="steelblue", linewidth=1)
+    plt.plot(global_epoch, all_val, label=L("Val Loss", "Val Loss"),
+             color="orangered", linewidth=1)
+
+    # 태스크 경계 표시 (동일 그래프 내 보조선/라벨일 뿐, 별도 이미지 아님)
+    for start_idx, task_name in boundaries:
+        plt.axvline(x=start_idx + 0.5, color="gray", linestyle="--", linewidth=0.6, alpha=0.6)
+        plt.text(start_idx + 1, plt.ylim()[1], task_name.replace(".csv", ""),
+                 rotation=90, fontsize=6, va='top', ha='left', alpha=0.7)
+
+    plt.xlabel(L("학습 순서에 따른 누적 Epoch", "Cumulative Epoch (training order)"))
     plt.ylabel(L("MSE Loss", "MSE Loss"))
-    plt.title(L(f"[{task_name}] Epoch별 Train / Val Loss",
-                f"[{task_name}] Train / Val Loss per Epoch"))
+    plt.title(L("전체 태스크 학습 순서에 따른 Train / Val Loss",
+                "Train / Val Loss over Continual Training Order"))
     plt.legend()
     plt.grid(alpha=0.3)
     plt.tight_layout()
 
-    safe_name = task_name.replace(".csv", "")
-    # path = os.path.join(plot_dir, f"{safe_name}_loss_curve_{date}.png")
-    # plt.savefig(path, dpi=150)
-    # plt.close()
-    # print(f"[그래프] {task_name} train/val loss curve 저장 → {path}")
-
-    # epoch별 수치도 CSV로 함께 저장 (재분석 용도)
-    hist_df = pd.DataFrame({
-        "epoch":      list(epochs),
-        "train_loss": train_losses,
-        "val_loss":   val_losses,
-    })
-    hist_csv = os.path.join(history_dir, f"{safe_name}_history.csv")
-    hist_df.to_csv(hist_csv, index=False)
-    print(f"[기록] {task_name} epoch별 loss 기록 저장 → {hist_csv}")
-
-
-def plot_all_tasks_history(history_all: Dict[str, Dict[str, List[float]]]):
-    """
-    모든 태스크의 train/val loss curve 를 한 화면에 서브플롯으로 모아
-    전체 흐름을 한 번에 비교할 수 있도록 저장합니다.
-    """
-    task_names = list(history_all.keys())
-    n = len(task_names)
-    if n == 0:
-        return
-
-    ncols = 2
-    nrows = (n + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4 * nrows))
-    axes = axes.flatten() if n > 1 else [axes]
-
-    for idx, task_name in enumerate(task_names):
-        ax = axes[idx]
-        train_losses = history_all[task_name]["train"]
-        val_losses   = history_all[task_name]["val"]
-        epochs = range(1, len(train_losses) + 1)
-
-        ax.plot(epochs, train_losses, label="Train", color="steelblue")
-        ax.plot(epochs, val_losses,   label="Val",   color="orangered")
-        ax.set_title(task_name)
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("MSE Loss")
-        ax.legend(fontsize=8)
-        ax.grid(alpha=0.3)
-
-    for j in range(n, len(axes)):
-        axes[j].axis('off')
-
-    plt.tight_layout()
-    path = os.path.join(plot_dir, f"all_tasks_loss_curve_{date}.png")
+    path = os.path.join(plot_dir, f"continuous_training_curve_{date}.png")
     plt.savefig(path, dpi=150)
     plt.close()
-    print(f"[그래프] 전체 태스크 train/val loss curve 저장 → {path}")
+    print(f"[그래프] 학습 순서에 따른 연속 loss curve 저장 → {path}")
+
+    # 수치 기록은 이미지가 아니므로 함께 저장 (재분석용, 지역 구분 컬럼 포함)
+    hist_df = pd.DataFrame({
+        "global_epoch":  global_epoch,
+        "task":          all_task_col,
+        "epoch_in_task": all_epoch_in_task,
+        "train_loss":    all_train,
+        "val_loss":      all_val,
+    })
+    hist_csv = os.path.join(history_dir, f"continuous_training_curve_{date}.csv")
+    hist_df.to_csv(hist_csv, index=False)
+    print(f"[기록] 학습 순서에 따른 loss 기록 저장 → {hist_csv}")
+
+
+# ════════════════════════════════════════════════════════════════════
+# [복원] 통합 test set 기준 continual-learning 성능 곡선 시각화
+# ════════════════════════════════════════════════════════════════════
+def plot_continual_test_curve(records: List[Dict]):
+    """
+    records: [{"stage": 0, "stage_task": "...", "mse":.., "rmse":.., "mae":..}, ...]
+
+    태스크를 하나씩 학습해 나가면서, 그 태스크 학습 직후 "그 태스크에서
+    막 fit된 scaler"로 test 데이터를 변환해 측정한 MSE/RMSE 변화를
+    하나의 곡선으로 그립니다.
+    """
+    if not records:
+        return
+
+    df = pd.DataFrame(records)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+
+    axes[0].plot(df["stage"], df["mse"], marker='o', color="steelblue")
+    axes[0].set_xticks(df["stage"])
+    axes[0].set_xticklabels(df["stage_task"], rotation=30, ha='right', fontsize=7)
+    axes[0].set_ylabel("MSE")
+    axes[0].set_title(L("Test Set 기준 MSE 변화 (매 태스크 자신의 scaler로 평가)",
+                        "MSE on Test Set (evaluated with each stage's own scaler)"))
+    axes[0].grid(alpha=0.3)
+
+    axes[1].plot(df["stage"], df["rmse"], marker='o', color="orangered")
+    axes[1].set_xticks(df["stage"])
+    axes[1].set_xticklabels(df["stage_task"], rotation=30, ha='right', fontsize=7)
+    axes[1].set_ylabel("RMSE")
+    axes[1].set_title(L("Test Set 기준 RMSE 변화 (매 태스크 자신의 scaler로 평가)",
+                        "RMSE on Test Set (evaluated with each stage's own scaler)"))
+    axes[1].grid(alpha=0.3)
+
+    plt.tight_layout()
+    path = os.path.join(plot_dir, f"continual_test_curve_{date}.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"[그래프] 통합 test set 기준 continual-learning 곡선 저장 → {path}")
+
+    csv_path = os.path.join(history_dir, f"continual_test_curve_{date}.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"[기록] 통합 test set 평가 기록 저장 → {csv_path}")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -581,7 +636,7 @@ def train_on_task(train_ds_raw: pd.DataFrame, task_name: str, val_size: float = 
 
     for ep in range(1, NUM_EPOCHS + 1):
         train_loss = train_epoch(train_loader, optimizer)
-        # sched.step()                                   # epoch 단위 lr 갱신
+        sched.step()                                   # epoch 단위 lr 갱신
 
         val_loss = compute_avg_loss(val_loader)         # ← 매 epoch validation
 
@@ -601,9 +656,11 @@ def train_on_task(train_ds_raw: pd.DataFrame, task_name: str, val_size: float = 
     #    in-memory model을 최선 상태로 되돌립니다.
     load_model(model, save_model_path)
 
-    # ── 태스크별 이력 저장 및 시각화 ────────────────────────────────
+    # ── 태스크별 이력 기록 (지역별 개별 이미지는 생성하지 않고, 수치만
+    #    history_all에 순서대로 쌓아둡니다. 실제 그래프는 main()에서
+    #    모든 태스크 학습이 끝난 뒤 plot_continuous_training_curve()로
+    #    "학습 순서에 따른 하나의 연속 곡선"으로 한 번에 그립니다.) ──
     history_all[task_name] = {"train": train_losses, "val": val_losses}
-    plot_task_history(task_name, train_losses, val_losses)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -615,10 +672,11 @@ def evaluate(task_name: str, test_ds_raw: pd.DataFrame,
     """
     현재 시점의 model을 test_ds_raw(raw 상태)로 평가합니다.
 
-    [요청 3] test 데이터의 스케일링은 이 함수 내부(tensor_dataset)에서
-    scaler 인자로 딱 한 번 수행됩니다. main()에서는 "모든 태스크 학습이
-    끝난 뒤의 최종 스케일러(CURRENT_SCALER)"를 이 scaler 인자로 넘겨,
-    전체 학습이 종료된 이후에만 test 스케일링과 최종 평가가 이루어지도록 합니다.
+    [수정] test 데이터의 스케일링은 이 함수 내부(tensor_dataset)에서
+    scaler 인자로 수행됩니다. main()에서는 "매 태스크 학습이 끝난 직후,
+    그 태스크에서 막 fit된 scaler(해당 stage의 CURRENT_SCALER)"를 이
+    scaler 인자로 넘겨, 태스크가 하나씩 추가될 때마다 그 시점 기준으로
+    test 성능을 즉시 측정합니다.
     """
     loader = val_dataloader(test_ds_raw, scaler)
     model.eval()
@@ -647,7 +705,7 @@ def evaluate(task_name: str, test_ds_raw: pd.DataFrame,
 
 # ════════════════════════════════════════════════════════════════════
 # 데이터 분리 (전체 데이터 → train 전체 / test)
-# ════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
 def data_split(df: pd.DataFrame, test_size: float = TEST_SIZE):
     """
     DataFrame을 train(전체) / test 로 분리합니다. (raw 상태, 스케일링 없음)
@@ -721,51 +779,82 @@ if __name__ == "__main__":
         raw_test[file_name]  = test_data
         print(f"  {file_name}: train(total)={len(train_data)}, test={len(test_data)}")
 
-    # ── 3. 태스크 순서대로 ER 학습 ────────────────────────────────
-    #     [요청 1,2] 스케일링은 train_on_task 내부에서 매 태스크마다
-    #     (current raw + replay raw)로 새로 fit되어 적용됩니다.
-    print(f"\n=== Experience Replay 학습 시작 ===")
-    for file_name, train_data in raw_train.items():
+    # ── 3. 통합 test set은 미리 하나로 합쳐둡니다 (raw 상태) ─────────
+    #     [요청 3] 실제 스케일링은 매 태스크 학습 직후, 그 태스크에서
+    #     막 fit된 scaler로 매번 다시 수행됩니다 (여기서는 raw로만 합침).
+    if False:
+        combined_test_raw = pd.concat(list(raw_test.values()), ignore_index=True)
+        print(f"[통합 Test Set] 전체 태스크 test를 합쳐 총 {len(combined_test_raw)}행 구성 (raw 상태)")
+
+        # ── 4. 태스크 순서대로 ER 학습 + 매 태스크 직후 test 평가 ────────
+        #     [요청 1,2] 스케일링은 train_on_task 내부에서 매 태스크마다
+        #     (current raw + replay raw)로 새로 fit되어 적용됩니다.
+        #     [요청 3] 그 태스크 학습이 끝나는 즉시, 방금 fit된 scaler로
+        #     통합 test set을 변환해 성능을 측정하고 기록합니다.
+        print(f"\n=== Experience Replay 학습 시작 (use_scaling={USE_SCALING}) ===")
+        continual_eval_records: List[Dict] = []
+
+        for stage, (file_name, train_data) in enumerate(raw_train.items()):
+            train_on_task(train_data, task_name=file_name, val_size=VAL_SIZE)
+
+            # 이번 태스크 학습 중 fit_task_scaler()가 만든, 이 태스크 전용 scaler
+            stage_scaler = CURRENT_SCALER
+            stage_result = evaluate(f"stage{stage}_{file_name}",
+                                    combined_test_raw, scaler=stage_scaler)
+            continual_eval_records.append({
+                "stage":      stage,
+                "stage_task": file_name,
+                "mse":        stage_result["mse"],
+                "rmse":       stage_result["rmse"],
+                "mae":        stage_result["mae"],
+            })
+    print(f"\n=== Experience Replay 학습 시작 (use_scaling={USE_SCALING}) ===")
+    continual_eval_records: List[Dict] = []
+    seen_test_list: List[pd.DataFrame] = []   # ← 학습이 끝난 도시의 test만 누적
+
+    for stage, (file_name, train_data) in enumerate(raw_train.items()):
         train_on_task(train_data, task_name=file_name, val_size=VAL_SIZE)
 
-    # ── 4. 전체 태스크 train/val loss curve 종합 시각화 ──────────
-    plot_all_tasks_history(history_all)
+        # 방금 학습을 마친 태스크의 test를 누적 목록에 추가
+        seen_test_list.append(raw_test[file_name])
+        seen_only_test = pd.concat(seen_test_list, ignore_index=True)  # "지금까지 배운 도시"만
 
-    # ── 5. [요청 3] 모든 학습이 끝난 뒤, 최종 스케일러로 test를 변환하여
-    #     단 한 번 최종 평가를 수행합니다.
-    #     CURRENT_SCALER는 마지막 태스크의 train_on_task 호출 중
-    #     fit_task_scaler()가 반환한 스케일러로, 그 시점의
-    #     (마지막 태스크 current raw + 그때까지의 replay raw)를 반영합니다.
-    #     use_scaling=False이면 CURRENT_SCALER는 None이며,
-    #     evaluate()는 raw 값을 그대로 사용합니다.
-    final_scaler = CURRENT_SCALER
-    if final_scaler is not None:
-        joblib.dump(final_scaler, os.path.join(scaler_dir, "final_scaler.pkl"))
-        print(f"\n[최종 스케일러] 저장 완료 → "
-             f"{os.path.join(scaler_dir, 'final_scaler.pkl')}")
+        stage_scaler = CURRENT_SCALER
+        stage_result = evaluate(f"stage{stage}_{file_name}",
+                                seen_only_test, scaler=stage_scaler)   # ← combined_test_raw 대신 seen_only_test
+        continual_eval_records.append({
+            "stage":      stage,
+            "stage_task": file_name,
+            "n_seen_tasks": len(seen_test_list),   # 참고용: 이 시점 test에 포함된 도시 수
+            "mse":        stage_result["mse"],
+            "rmse":       stage_result["rmse"],
+            "mae":        stage_result["mae"],
+        })
 
-    combined_test_raw = pd.concat(list(raw_test.values()), ignore_index=True)
-    print(f"[통합 Test Set] 전체 태스크 test를 합쳐 총 {len(combined_test_raw)}행 구성 "
-         f"(스케일링은 이 시점에 최종 스케일러로 1회 적용)")
+    # ── 5. 학습 순서에 따른 연속 train/val loss curve 시각화 ─────────
+    #     (지역별 개별 이미지는 생성하지 않고, 하나의 연속된 그래프만 저장)
+    plot_continuous_training_curve(history_all)
 
-    final_result = evaluate(f"Final(all {len(raw_test)} tasks)",
-                            combined_test_raw, scaler=final_scaler)
+    # ── 6. 매 태스크 직후 측정한 test 성능을 하나의 곡선으로 시각화 ────
+    plot_continual_test_curve(continual_eval_records)
 
-    # ── 6. 최종 모델 저장 ─────────────────────────────────────────
-    final_path = os.path.join(save_model_dir, f"model_{date}_scaling{USE_SCALING}.pth")
+    # ── 7. 최종 모델 저장 ─────────────────────────────────────────
+    final_path = os.path.join(save_model_dir, f"model_{date}.pth")
     save_model(model, final_path, epoch=NUM_EPOCHS, loss=None)
 
-    # ── 7. 최종 결과 CSV 저장 (스케일링 유무 비교가 쉽도록 flag를 파일명에 포함) ──
-    csv_path = os.path.join(save_model_dir, f"results_{date}_scaling{USE_SCALING}.csv")
+    # ── 8. 전체 stage 결과 CSV 저장 (스케일링 유무 비교가 쉽도록 flag를 파일명에 포함) ──
+    final_result = continual_eval_records[-1]
+    csv_path = os.path.join(save_model_dir, f"results_{date}.csv")
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['use_scaling', 'MSE', 'RMSE', 'MAE'])
-        writer.writerow([USE_SCALING,
-                         f"{final_result['mse']:.4f}",
-                         f"{final_result['rmse']:.4f}",
-                         f"{final_result['mae']:.4f}"])
+        writer.writerow(['use_scaling', 'Stage', 'Task', 'MSE', 'RMSE', 'MAE'])
+        for rec in continual_eval_records:
+            writer.writerow([USE_SCALING, rec['stage'], rec['stage_task'],
+                             f"{rec['mse']:.4f}",
+                             f"{rec['rmse']:.4f}",
+                             f"{rec['mae']:.4f}"])
     print(f"\n결과 저장 완료 → {csv_path}")
-    print(f"최종(전체 학습 완료 후) 통합 test set 성능 (use_scaling={USE_SCALING}): "
+    print(f"최종(전체 학습 완료 후) test set 성능 (use_scaling={USE_SCALING}): "
          f"MSE={final_result['mse']:.4f} | "
          f"RMSE={final_result['rmse']:.4f} | "
          f"MAE={final_result['mae']:.4f}")
