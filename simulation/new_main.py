@@ -15,12 +15,6 @@ import numpy as np
 import pandas as pd
 from typing import List, Tuple, Dict, Optional
 
-import matplotlib
-matplotlib.use("Agg")   # 화면 없는 환경(서버)에서도 저장 가능하도록
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-import platform
-
 import ER_.loss_func as lfn
 from ER_.utils import device as get_device
 from csv_factory import create_CSV
@@ -59,21 +53,49 @@ dataloader_generator = torch.Generator()
 dataloader_generator.manual_seed(SEED)
 
 
+# ── 주파수 대역 라벨 ─────────────────────────────────────────────
+# freq 리스트의 값을 LTE/5G/6G 대역 이름으로 매핑합니다.
+# evaluation.py가 여러 실행 결과를 주파수 대역별로 비교할 때 사용됩니다.
+FREQ_BAND_LABELS = {
+    900_000_000:    "LTE_900M",
+    1_800_000_000:  "LTE_1.8G",
+    2_100_000_000:  "LTE_2.1G",
+    3_500_000_000:  "5G_3.5G",
+    7_125_000_000:  "6G_7.125G",
+    14_800_000_000: "6G_14.8G",
+}
+
+def get_freq_band_label(freq_list: List[int]) -> str:
+    """freq 리스트의 첫 값을 기준으로 대역 라벨을 반환합니다."""
+    if not freq_list:
+        return "unknown"
+    return FREQ_BAND_LABELS.get(freq_list[0], f"{freq_list[0] / 1e9:.3f}G")
+
+
 # ── 하이퍼파라미터 ────────────────────────────────────────────────
 BATCH_SIZE       = 256
 NUM_EPOCHS       = 100
 LR               = 1e-3
-LAMBDA           = 0.5
-BETA             = 0
+ALPHA            = 0.5
+BETA             = 0.7
+HIDDEN_DIM       = 64      # MLP hidden node 수
+LAYER_NUM        = 2       # MLP layer 수
 memory_capacity  = 5000
 VAL_SIZE         = 0.2     # train 내부에서 val로 떼어낼 비율
 TEST_SIZE        = 0.2     # 전체 데이터에서 test로 떼어낼 비율
 
-USE_REPLAY  = False
+USE_REPLAY  = True
 USE_LARS    = False
 USE_SCALING = True
 
-save = "Normal_MLP"
+freq = [3_500_000_000]
+FREQ_BAND = get_freq_band_label(freq)
+
+# 이번 실행을 구분하는 이름입니다. 여러 하이퍼파라미터 조합으로 반복
+# 실행할 때(evaluation.py에서 결과를 비교하려면) 실행마다 다른 값으로
+# 바꿔주어야 결과 CSV 파일명이 서로 덮어써지지 않습니다.
+save = f"alpha{ALPHA}_beta{BETA}_hd{HIDDEN_DIM}_layer{LAYER_NUM}_{FREQ_BAND}"
+
 
 # ── 장치 설정 ─────────────────────────────────────────────────────
 device = get_device()
@@ -113,7 +135,7 @@ target            = "PL"
 # ── CSV 생성 설정 ─────────────────────────────────────────────────
 # (transmitter 그룹, 주파수 리스트, 저장 파일명) 형태로 태스크를 정의합니다.
 # 태스크를 추가하려면 아래 리스트에 항목을 추가하면 됩니다.
-freq = [3_500_000_000]
+
 
 MBC_CheongJu = [Transmitter("MBC-CheongJu", 127.433977355451, 36.61907632039761)]
 Broad_CheongJu = [Transmitter('Broad-CheongJu', 127.47905459727248, 36.63418678335862)]
@@ -160,42 +182,12 @@ task_configs: List[Tuple] = [
 
 # ── 저장 경로 ─────────────────────────────────────────────────────
 save_model_dir  = "simulation/ER_/model/"
-plot_dir        = os.path.join(save_model_dir, "plots")
 history_dir     = os.path.join(save_model_dir, "history")
 scaler_dir      = os.path.join(save_model_dir, "scalers")
 save_model_path = os.path.join(save_model_dir, "model.pth")
 os.makedirs(save_model_dir, exist_ok=True)
-os.makedirs(plot_dir, exist_ok=True)
 os.makedirs(history_dir, exist_ok=True)
 os.makedirs(scaler_dir, exist_ok=True)
-
-
-# ════════════════════════════════════════════════════════════════════
-# 한글 폰트 설정 (그래프 라벨 깨짐 방지)
-# ════════════════════════════════════════════════════════════════════
-def _setup_korean_font() -> bool:
-    system = platform.system()
-    candidates = {
-        "Windows": ["Malgun Gothic"],
-        "Darwin":  ["AppleGothic"],
-        "Linux":   ["NanumGothic", "Noto Sans CJK KR", "Noto Sans KR"],
-    }.get(system, [])
-    installed = {f.name for f in fm.fontManager.ttflist}
-    for name in candidates:
-        if name in installed:
-            plt.rcParams["font.family"] = name
-            plt.rcParams["axes.unicode_minus"] = False
-            return True
-    plt.rcParams["axes.unicode_minus"] = False
-    return False
-
-
-USE_KOREAN_LABELS = _setup_korean_font()
-
-
-def L(korean: str, english: str) -> str:
-    """한글 폰트가 없으면 자동으로 영문 라벨을 사용합니다."""
-    return korean if USE_KOREAN_LABELS else english
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -217,7 +209,7 @@ class MyMLP(nn.Module):
         return self.output_node(x)
 
 
-model = MyMLP(input_dim=4, hidden_dim=64, output_dim=1, layer_num=2).to(device)
+model = MyMLP(input_dim=4, hidden_dim=HIDDEN_DIM, output_dim=1, layer_num=LAYER_NUM).to(device)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -494,8 +486,8 @@ def train_epoch(data_loader, optimizer) -> float:
             # 각각 가중합하여 최종 loss를 구성합니다.
             loss_batch_rep = lfn.MSE_loss(Y_pred[is_rep], Y[is_rep])
             distill_loss   = lfn.MSE_loss(Y_pred[is_rep], Y_t[is_rep])
-            total_loss_batch = (LAMBDA * loss_batch_cur
-                               + (1 - LAMBDA) * loss_batch_rep
+            total_loss_batch = (ALPHA * loss_batch_cur
+                               + (1 - ALPHA) * loss_batch_rep
                                + BETA * distill_loss)
         else:
             total_loss_batch = loss_batch_cur
@@ -537,51 +529,6 @@ def compute_avg_loss(loader: DataLoader) -> float:
         total_loss += lfn.MSE_loss(Y_pred, Y).item()
 
     return total_loss / max(n_batches, 1)
-
-
-# ════════════════════════════════════════════════════════════════════
-# 통합 test set 기준 continual-learning 성능 곡선 시각화
-# ════════════════════════════════════════════════════════════════════
-def plot_continual_test_curve(records: List[Dict]):
-    """
-    records: [{"stage": 0, "stage_task": "...", "mse":.., "rmse":.., "mae":..}, ...]
-
-    태스크를 하나씩 학습해 나가면서, 그 태스크 학습 직후 해당 태스크에서
-    막 fit된 scaler로 test 데이터를 변환해 측정한 MSE/RMSE 변화를
-    하나의 곡선으로 그립니다.
-    """
-    if not records:
-        return
-
-    df = pd.DataFrame(records)
-
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-
-    axes[0].plot(df["stage"], df["mse"], marker='o', color="steelblue")
-    axes[0].set_xticks(df["stage"])
-    axes[0].set_xticklabels(df["stage_task"], rotation=30, ha='right', fontsize=7)
-    axes[0].set_ylabel("MSE")
-    axes[0].set_title(L("Test Set 기준 MSE 변화 (매 태스크 자신의 scaler로 평가)",
-                        "MSE on Test Set (evaluated with each stage's own scaler)"))
-    axes[0].grid(alpha=0.3)
-
-    axes[1].plot(df["stage"], df["rmse"], marker='o', color="orangered")
-    axes[1].set_xticks(df["stage"])
-    axes[1].set_xticklabels(df["stage_task"], rotation=30, ha='right', fontsize=7)
-    axes[1].set_ylabel("RMSE")
-    axes[1].set_title(L("Test Set 기준 RMSE 변화 (매 태스크 자신의 scaler로 평가)",
-                        "RMSE on Test Set (evaluated with each stage's own scaler)"))
-    axes[1].grid(alpha=0.3)
-
-    plt.tight_layout()
-    path = os.path.join(plot_dir, f"test_curve_{save}.png")
-    plt.savefig(path, dpi=150)
-    plt.close()
-    print(f"[그래프] 통합 test set 기준 continual-learning 곡선 저장 → {path}")
-
-    csv_path = os.path.join(history_dir, f"test_curve_{save}.csv")
-    df.to_csv(csv_path, index=False)
-    print(f"[기록] 통합 test set 평가 기록 저장 → {csv_path}")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -770,44 +717,94 @@ if __name__ == "__main__":
 
     print(f"\n=== Experience Replay 학습 시작 ===")
     continual_eval_records: List[Dict] = []
-    seen_test_list: List[pd.DataFrame] = []   # 학습이 끝난 도시의 test만 누적
+    seen_tasks: List[str] = []   # 지금까지 학습을 마친 태스크 이름을 순서대로 누적
 
     for stage, (file_name, train_data) in enumerate(raw_train.items()):
         train_on_task(train_data, task_name=file_name, val_size=VAL_SIZE)
 
-        seen_test_list.append(raw_test[file_name])
-        seen_only_test = pd.concat(seen_test_list, ignore_index=True)   # 지금까지 배운 도시만
-        whole_test = pd.concat(list(raw_test.values()), ignore_index=True)  # 전체 test (참고용)
-
+        seen_tasks.append(file_name)
         stage_scaler = CURRENT_SCALER
-        stage_result = evaluate(f"stage{stage}_{file_name}",
-                                whole_test, scaler=stage_scaler)
-        continual_eval_records.append({
-            "stage":        stage,
-            "stage_task":   file_name,
-            "n_seen_tasks": len(seen_test_list),
-            "mse":          stage_result["mse"],
-            "rmse":         stage_result["rmse"],
-            "mae":          stage_result["mae"],
-        })
 
-    plot_continual_test_curve(continual_eval_records)
+        # 이번 stage 시점까지 학습을 마친 모든 태스크의 test set을
+        # 각각 개별적으로 평가합니다. 예를 들어 2번째 태스크를 학습한
+        # 직후에는 1번 태스크의 test와 2번 태스크의 test를 따로따로
+        # 평가하여 각각 기록합니다. 이렇게 하면 특정 태스크(예: 1번)의
+        # test 성능이, 이후 다른 태스크들을 계속 학습해 나가는 동안
+        # 어떻게 변화하는지(유지되는지/잊혀지는지)를 태스크별로
+        # 추적할 수 있습니다.
+        for eval_task in seen_tasks:
+            eval_result = evaluate(f"stage{stage}_{file_name}_on_{eval_task}",
+                                   raw_test[eval_task], scaler=stage_scaler)
+            continual_eval_records.append({
+                "stage":      stage,
+                "stage_task": file_name,     # 이번 stage에서 새로 학습한 태스크
+                "eval_task":  eval_task,     # 이 test 결과가 어느 태스크의 test set인지
+                "mse":        eval_result["mse"],
+                "rmse":       eval_result["rmse"],
+                "mae":        eval_result["mae"],
+            })
 
     final_path = os.path.join(save_model_dir, f"model_{save}.pth")
     save_model(model, final_path, epoch=NUM_EPOCHS, loss=None)
 
-    final_result = continual_eval_records[-1]
-    csv_path = os.path.join(save_model_dir, f"results_{save}.csv")
-    with open(csv_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['use_scaling', 'Stage', 'Task', 'MSE', 'RMSE', 'MAE'])
+    # ── 실험 조건 메타데이터 ─────────────────────────────────────────
+    # evaluation.py가 여러 실행 결과를 하이퍼파라미터/주파수 대역/모델
+    # 구조별로 비교할 수 있도록, 이번 실행의 설정값을 모든 결과 행에
+    # 함께 기록합니다.
+    run_meta = {
+        "run_name":   save,
+        "use_scaling": USE_SCALING,
+        "alpha":      ALPHA,
+        "beta":       BETA,
+        "hidden_dim": HIDDEN_DIM,
+        "layer_num":  LAYER_NUM,
+        "freq_band":  FREQ_BAND,
+    }
+
+    # ── validation 결과 CSV 저장 ─────────────────────────────────────
+    # history_all에 태스크별로 순서대로 쌓인 epoch별 train/val loss를
+    # 하나의 표로 펼쳐서 저장합니다.
+    val_rows = []
+    for task_name, hist in history_all.items():
+        for ep, (tr, vl) in enumerate(zip(hist["train"], hist["val"]), start=1):
+            val_rows.append({
+                **run_meta,
+                "task":       task_name,
+                "epoch":      ep,
+                "train_loss": tr,
+                "val_loss":   vl,
+            })
+    val_csv_path = os.path.join(history_dir, f"validation_{save}.csv")
+    pd.DataFrame(val_rows).to_csv(val_csv_path, index=False)
+    print(f"\nvalidation 결과 저장 완료 → {val_csv_path}")
+
+    # ── test 결과 CSV 저장 ────────────────────────────────────────────
+    # stage, stage_task(이번에 학습한 태스크), eval_task(평가 대상 test set),
+    # mse/rmse/mae를 그대로 행 단위로 기록합니다. 한 stage에 대해 여러 개의
+    # eval_task 행이 존재합니다(그 시점까지 학습된 태스크 수만큼).
+    test_csv_path = os.path.join(save_model_dir, f"results_{save}.csv")
+    with open(test_csv_path, 'w', newline='') as f:
+        fieldnames = list(run_meta.keys()) + ['stage', 'stage_task', 'eval_task', 'mse', 'rmse', 'mae']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
         for rec in continual_eval_records:
-            writer.writerow([USE_SCALING, rec['stage'], rec['stage_task'],
-                             f"{rec['mse']:.4f}",
-                             f"{rec['rmse']:.4f}",
-                             f"{rec['mae']:.4f}"])
-    print(f"\n결과 저장 완료 → {csv_path}")
-    print(f"최종(전체 학습 완료 후) test set 성능: "
-         f"MSE={final_result['mse']:.4f} | "
-         f"RMSE={final_result['rmse']:.4f} | "
-         f"MAE={final_result['mae']:.4f}")
+            writer.writerow({
+                **run_meta,
+                'stage':      rec['stage'],
+                'stage_task': rec['stage_task'],
+                'eval_task':  rec['eval_task'],
+                'mse':        f"{rec['mse']:.4f}",
+                'rmse':       f"{rec['rmse']:.4f}",
+                'mae':        f"{rec['mae']:.4f}",
+            })
+    print(f"test 결과 저장 완료 → {test_csv_path}")
+
+    # 최종 요약: 마지막 stage에서 평가된 모든 eval_task(=전체 태스크)의
+    # 평균 성능을 출력합니다.
+    last_stage = continual_eval_records[-1]["stage"]
+    final_rows = [r for r in continual_eval_records if r["stage"] == last_stage]
+    final_mse  = sum(r["mse"]  for r in final_rows) / len(final_rows)
+    final_rmse = sum(r["rmse"] for r in final_rows) / len(final_rows)
+    final_mae  = sum(r["mae"]  for r in final_rows) / len(final_rows)
+    print(f"최종(전체 학습 완료 후) 태스크 평균 test 성능: "
+         f"MSE={final_mse:.4f} | RMSE={final_rmse:.4f} | MAE={final_mae:.4f}")
