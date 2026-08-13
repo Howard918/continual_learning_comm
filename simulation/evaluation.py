@@ -77,16 +77,26 @@ def _filter_eq(df: pd.DataFrame, col: str, val) -> pd.DataFrame:
     부동소수점 비교 오차(예: BETA=0 을 실행마다 0 / 0.0 등으로 다르게
     기록했을 때)로 인해 필터링에서 행이 누락되는 것을 방지합니다.
     """
+    if df.empty or col not in df.columns:
+        return df
     if pd.api.types.is_numeric_dtype(df[col]):
         return df[np.isclose(df[col].astype(float), float(val))]
     return df[df[col] == val]
 
 
-def load_all_results(aggregate_over_eval_task: bool = True) -> pd.DataFrame:
+def load_all_results(aggregate_over_eval_task: bool = True,
+                     sweep_tag: Optional[str] = None) -> pd.DataFrame:
     """
-    save_model_dir에 저장된 모든 results_*.csv를 하나로 합쳐서 반환합니다.
+    save_model_dir에 저장된 results_*.csv들을 하나로 합쳐서 반환합니다.
     각 행에는 run_name, alpha, beta, hidden_dim, layer_num, freq_band 등
     실행 조건이 함께 기록되어 있습니다.
+
+    sweep_tag를 지정하면, 파일을 읽는 시점부터 그 sweep_tag에 해당하는
+    run만 골라서 로드합니다. 즉 다른 목적의 스윕(alpha_sweep, freq_sweep,
+    hidden_dim_sweep 등)에서 나온 파일은 애초에 합치기(concat) 대상에도
+    포함되지 않습니다. 이렇게 해야 서로 다른 스윕의 run이 하이퍼파라미터
+    조건이 우연히 같다는 이유만으로 섞여 들어가는 것을 원천적으로 막을 수
+    있습니다. sweep_tag=None이면(기본값) 필터링 없이 전체를 로드합니다.
 
     results_*.csv는 (b) 항목의 목적을 위해 stage당 eval_task 개수만큼의
     행을 담고 있습니다. c/d/e처럼 "그 시점까지 학습한 모든 태스크에 대한
@@ -100,10 +110,32 @@ def load_all_results(aggregate_over_eval_task: bool = True) -> pd.DataFrame:
             f"{SAVE_MODEL_DIR} 에서 results_*.csv 파일을 찾지 못했습니다. "
             "new_main.py를 먼저 실행해 결과를 생성해야 합니다."
         )
-    print(f"[로드] results_*.csv {len(paths)}개 파일 합침: "
-         f"{[os.path.basename(p) for p in paths]}")
 
-    df = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
+    dfs = []
+    for p in paths:
+        d = pd.read_csv(p)
+
+        if sweep_tag is not None:
+            if "sweep_tag" not in d.columns:
+                print(f"[경고] {os.path.basename(p)}에 sweep_tag 컬럼이 없어 "
+                     "이 sweep 비교에서 건너뜁니다. new_main.py를 최신 "
+                     "버전으로 다시 실행해야 sweep_tag로 로드할 수 있습니다.")
+                continue
+            d = d[d["sweep_tag"] == sweep_tag]
+            if d.empty:
+                continue
+
+        dfs.append(d)
+
+    if not dfs:
+        if sweep_tag is not None:
+            print(f"[경고] sweep_tag='{sweep_tag}' 에 해당하는 results_*.csv가 "
+                 "없습니다.")
+        return pd.DataFrame()
+
+    df = pd.concat(dfs, ignore_index=True)
+    tag_note = f" (sweep_tag='{sweep_tag}')" if sweep_tag else ""
+    print(f"[로드] results_*.csv {len(dfs)}/{len(paths)}개 파일{tag_note} 합침")
     print(f"[로드] run_name 종류: {sorted(df['run_name'].unique())}")
 
     if not aggregate_over_eval_task:
@@ -201,19 +233,28 @@ def plot_test_by_task(run_name: str, metric: str = "mse"):
 # ════════════════════════════════════════════════════════════════════
 # c. Alpha / Beta 스윕 비교
 # ════════════════════════════════════════════════════════════════════
-def plot_hyperparam_sweep(param: str, fixed: dict, metric: str = "mse"):
+def plot_hyperparam_sweep(param: str, fixed: dict, metric: str = "mse",
+                          sweep_tag: Optional[str] = None):
     """
     param(alpha 또는 beta)의 값을 바꿔가며 실행한 여러 run들을 비교합니다.
+
+    sweep_tag를 지정하면(권장) 먼저 new_main.py의 SWEEP_TAG가 그 값과
+    일치하는 run만 남긴 뒤 비교합니다. 이렇게 해야 다른 목적의 스윕
+    (예: freq_sweep)에서 나온 run이 alpha/beta 조건이 우연히 같다는
+    이유만으로 이 비교에 섞여 들어가는 것을 막을 수 있습니다.
+
     fixed에 지정한 다른 하이퍼파라미터(예: beta=0)는 값이 고정된 run만
     필터링해서 사용합니다. 각 run(=param 값)이 하나의 선으로 그려지며,
     범례는 param 값입니다.
     """
-    df = load_all_results()
+    df = load_all_results(sweep_tag=sweep_tag)
+
     for key, val in fixed.items():
         df = _filter_eq(df, key, val)
 
     if df.empty:
-        print(f"[경고] {param} 스윕: fixed={fixed} 조건에 맞는 결과가 없습니다.")
+        print(f"[경고] {param} 스윕: sweep_tag={sweep_tag}, fixed={fixed} "
+             f"조건에 맞는 결과가 없습니다.")
         return
 
     unique_vals = sorted(df[param].unique())
@@ -238,13 +279,15 @@ def plot_hyperparam_sweep(param: str, fixed: dict, metric: str = "mse"):
     ax.legend(title=param)
     ax.grid(alpha=0.3)
 
-    _save(fig, f"c_{param}_sweep_{metric}.png")
+    _save(fig, f"c_{param}_sweep_{metric}({fixed_str}).png")
 
 
 def plot_alpha_beta_sweep(metric: str = "mse"):
-    """alpha 스윕(beta=0 고정)과 beta 스윕(alpha=0.5 고정)을 각각 그립니다."""
-    plot_hyperparam_sweep("alpha", fixed={"beta": 0}, metric=metric)
-    plot_hyperparam_sweep("beta",  fixed={"alpha": 0.5}, metric=metric)
+    """alpha 스윕과 beta 스윕을 각각 그립니다."""
+    plot_hyperparam_sweep("alpha", fixed={"beta": 0.0}, metric=metric,
+                          sweep_tag="alpha_sweep")
+    plot_hyperparam_sweep("beta",  fixed={"alpha": 0.3}, metric=metric,
+                          sweep_tag="beta_sweep")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -254,8 +297,17 @@ def plot_freq_band_sweep(metric: str = "mse"):
     """
     freq_band(LTE_900M, LTE_1.8G, LTE_2.1G, 5G_3.5G, 6G_7.125G, 6G_14.8G)별로
     실행한 run들을 하나의 그래프에서 비교합니다. 범례는 주파수 대역입니다.
+
+    new_main.py에서 SWEEP_TAG="freq_sweep"로 설정하고 실행한 run만
+    사용합니다. (alpha/beta 스윕 등 다른 목적의 run이 주파수 조건이
+    우연히 같다는 이유만으로 섞여 들어가는 것을 방지합니다.)
     """
-    df = load_all_results()
+    df = load_all_results(sweep_tag="freq_sweep")
+
+    if df.empty:
+        print("[경고] freq_sweep 태그가 붙은 결과가 없습니다.")
+        return
+
     unique_bands = sorted(df["freq_band"].unique())
     print(f"[진단] freq_band 종류: {unique_bands}")
     if len(unique_bands) < 2:
@@ -285,13 +337,16 @@ def plot_architecture_sweep(metric: str = "mse"):
     """
     hidden_node 스윕(layer_num=2 고정)과 layer 스윕(hidden_dim=64 고정)을
     각각 그립니다.
-    """
-    df = load_all_results()
 
-    # hidden_node 스윕: layer_num=2 로 고정된 run만 사용
-    hidden_df = _filter_eq(df, "layer_num", 2)
+    new_main.py에서 SWEEP_TAG="hidden_sweep" / "layer_sweep"으로 설정하고
+    실행한 run만 각각 사용합니다.
+    """
+    # hidden_node 스윕: sweep_tag="hidden_dim_sweep" + layer_num=2 로 고정된 run만 사용
+    hidden_df = load_all_results(sweep_tag="hidden_dim_sweep")
+    hidden_df = _filter_eq(hidden_df, "layer_num", 2)
     if hidden_df.empty:
-        print("[경고] hidden_node 스윕: layer_num=2로 고정된 결과가 없습니다.")
+        print("[경고] hidden_node 스윕: sweep_tag='hidden_dim_sweep' + "
+             "layer_num=2로 고정된 결과가 없습니다.")
     else:
         unique_hd = sorted(hidden_df["hidden_dim"].unique())
         print(f"[진단] hidden_node 스윕: hidden_dim 값 종류: {unique_hd}")
@@ -311,12 +366,14 @@ def plot_architecture_sweep(metric: str = "mse"):
                        f"Test {metric.upper()} by hidden_node (layer=2 fixed)"))
         ax.legend(title="hidden_node")
         ax.grid(alpha=0.3)
-        _save(fig, f"e_hidden_node_sweep_{metric}.png")
+        _save(fig, f"e_hidden_dim_sweep_{metric}.png")
 
-    # layer 스윕: hidden_dim=64 로 고정된 run만 사용
-    layer_df = _filter_eq(df, "hidden_dim", 64)
+    # layer 스윕: sweep_tag="layer_num_sweep" + hidden_dim=64 로 고정된 run만 사용
+    layer_df = load_all_results(sweep_tag="layer_num_sweep")
+    layer_df = _filter_eq(layer_df, "hidden_dim", 64)
     if layer_df.empty:
-        print("[경고] layer 스윕: hidden_dim=64로 고정된 결과가 없습니다.")
+        print("[경고] layer 스윕: sweep_tag='layer_num_sweep' + "
+             "hidden_dim=64로 고정된 결과가 없습니다.")
     else:
         unique_ln = sorted(layer_df["layer_num"].unique())
         print(f"[진단] layer 스윕: layer_num 값 종류: {unique_ln}")
@@ -336,7 +393,7 @@ def plot_architecture_sweep(metric: str = "mse"):
                        f"Test {metric.upper()} by layer count (hidden_node=64 fixed)"))
         ax.legend(title="layer")
         ax.grid(alpha=0.3)
-        _save(fig, f"e_layer_sweep_{metric}.png")
+        _save(fig, f"e_layer_num_sweep_{metric}.png")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -346,7 +403,7 @@ if __name__ == "__main__":
 
     # a, b: 단일 run에 대한 태스크별 breakdown.
     # new_main.py의 `save` 변수와 동일한 값을 지정해야 합니다.
-    TARGET_RUN_NAME = "alpha_0.5"
+    TARGET_RUN_NAME = "alpha_sweep_alpha0.5_beta0.7_hd64_layer2_LTE_2.1G"
 
     plot_validation_by_task(TARGET_RUN_NAME)
     plot_test_by_task(TARGET_RUN_NAME, metric="mse")
