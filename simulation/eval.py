@@ -38,7 +38,7 @@ import platform
 
 # ── new_main.py 를 모듈로 임포트 ───────────────────────────────────
 #    (같은 디렉토리에 new_main.py 가 있어야 합니다)
-import new_main as nm
+import simulation.main as nm
 
 
 # ════════════════════════════════════════════════════════════════════
