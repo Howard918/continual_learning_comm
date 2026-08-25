@@ -65,39 +65,29 @@ FREQ_BAND_LABELS = {
     14_800_000_000: "6G_14.8G",
 }
 
-def get_freq_band_label(freq_list: List[int]) -> str:
-    """freq 리스트의 첫 값을 기준으로 대역 라벨을 반환합니다."""
-    if not freq_list:
-        return "unknown"
-    return FREQ_BAND_LABELS.get(freq_list[0], f"{freq_list[0] / 1e9:.3f}G")
-
 
 # ── 하이퍼파라미터 ────────────────────────────────────────────────
 BATCH_SIZE       = 256
 NUM_EPOCHS       = 100
 LR               = 1e-3
 ALPHA            = 0.5
-BETA             = 0.7
 HIDDEN_DIM       = 64      # MLP hidden node 수
 LAYER_NUM        = 2       # MLP layer 수
 memory_capacity  = 5000
 VAL_SIZE         = 0.2     # train 내부에서 val로 떼어낼 비율
 TEST_SIZE        = 0.2     # 전체 데이터에서 test로 떼어낼 비율
 
-USE_REPLAY  = True
-USE_LARS    = False
+USE_REPLAY  = True   # replay buffer를 사용하여 학습할지 여부
 USE_SCALING = True
 
-freq = [2_100_000_000]
-FREQ_BAND = get_freq_band_label(freq)
+freq = [900_000_000, 1_800_000_000, 2_100_000_000, 3_500_000_000, 7_125_000_000, 14_800_000_000]
 
 SWEEP_ALPHA = {"alpha": [0.1, 0.3, 0.5, 0.7, 0.9]}
-SWEEP_BETA = {"beta": [0.0, 0.1, 0.3, 0.5, 0.7, 0.9]}
 SWEEP_HIDDEN_DIM = {"hidden_dim": [16, 32, 64, 128]}
 SWEEP_LAYER_NUM = {"layer_num": [1, 2, 3, 4, 5]}
-SWEEP_FREQ_BAND = {"freq": list(FREQ_BAND_LABELS.keys())}
+NO_SWEEP = {"ER_2": [None]}
 
-SWEEP_PARAM = SWEEP_FREQ_BAND  # SWEEP_ALPHA / SWEEP_BETA / SWEEP_HIDDEN_DIM / SWEEP_LAYER_NUM / SWEEP_FREQ_BAND
+SWEEP_PARAM = NO_SWEEP  # SWEEP_ALPHA / SWEEP_BETA / SWEEP_HIDDEN_DIM / SWEEP_LAYER_NUM / SWEEP_FREQ_BAND
 
 # 이번 실행을 구분하는 이름입니다. 여러 하이퍼파라미터 조합으로 반복
 # 실행할 때(evaluation.py에서 결과를 비교하려면) 실행마다 다른 값으로
@@ -139,7 +129,7 @@ CURRENT_SCALER: Optional[RobustScaler] = None
 history_all: Dict[str, Dict[str, List[float]]] = {}
 
 # ── 데이터 설정 ───────────────────────────────────────────────────
-default_data_path = f"MLP/DATA/{FREQ_BAND}"
+default_data_path = f"MLP/DATA/"
 features          = ["R", "D", "H", "F"]
 target            = "PL"
 
@@ -155,8 +145,8 @@ KBS_DaeJeon = [Transmitter("KBS-DaeJeon", 127.380567392303, 36.3704437169546)]
 CMB_DaeJeon = [Transmitter("CMB-DaeJeon", 127.419676653034, 36.3341326962576)]
 MBC_ChungJu = [Transmitter("MBC-ChungJu", 127.924378514041, 36.9585291745712)]
 KBS_ChungJu = [Transmitter("KBS-ChungJu", 127.920483843397, 36.9724980330778)]
-KBS_main = [Transmitter("KBS_main", 126.916716838156, 37.5259698897016)]
-SBS = [Transmitter("SBS", 126.87374657727, 37.5291902429029)]
+KBS_Seoul = [Transmitter("KBS_Seoul", 126.916716838156, 37.5259698897016)]
+SBS_Seoul = [Transmitter("SBS_Seoul", 126.87374657727, 37.5291902429029)]
 MBC_sa = [Transmitter("MBC_sa", 126.890988995582, 37.5811234199086)]
 KBS_KangNeung = [Transmitter("KBS-KangNeung", 128.891256884067, 37.7520385140085)]
 MBC_KangNeung = [Transmitter("MBC-KangNeung", 128.904230376246, 37.7709174571674)]
@@ -178,24 +168,12 @@ def build_task_configs(freq_list: List[int]) -> List[Tuple]:
     """
     return [
         (MBC_CheongJu, freq_list, "MBC_CheongJu.csv"),
-        (Broad_CheongJu, freq_list, "Broad_CheongJu.csv"),
-        (MBC_DaeJeon, freq_list, "MBC_DaeJeon.csv"),
         (KBS_DaeJeon, freq_list, "KBS_DaeJeon.csv"),
-        (CMB_DaeJeon, freq_list, "CMB_DaeJeon.csv"),
+        (KBS_Seoul, freq_list, "KBS_Seoul.csv"),
         (MBC_ChungJu, freq_list, "MBC_ChungJu.csv"),
-        (KBS_ChungJu, freq_list, "KBS_ChungJu.csv"),
-        (KBS_main, freq_list, "KBS_main.csv"),
-        (SBS, freq_list, "SBS.csv"),
-        (MBC_sa, freq_list, "MBC_sa.csv"),
         (KBS_KangNeung, freq_list, "KBS_KangNeung.csv"),
-        (MBC_KangNeung, freq_list, "MBC_KangNeung.csv"),
         (TBN_DaeGu, freq_list, "TBN_DaeGu.csv"),
-        (TBC_DaeGu, freq_list, "TBC_DaeGu.csv"),
-        (JeonJu_Radio, freq_list, "JeonJu_Radio.csv"),
-        (KBS_JeonJu, freq_list, "KBS_JeonJu.csv"),
-        (KBS_MokPo, freq_list, "KBS_MokPo.csv"),
         (KBS_SunCheon, freq_list, "KBS_SunCheon.csv"),
-        (KBS_GwangJu, freq_list, "KBS_GwangJu.csv"),
     ]
 
 
@@ -281,13 +259,6 @@ def load_model(model, path, optimizer=None):
 # ════════════════════════════════════════════════════════════════════
 # 리플레이 버퍼 관련 함수
 # ════════════════════════════════════════════════════════════════════
-def lars_victim() -> int:
-    """버퍼 내 loss가 낮은(=쉬운) 샘플일수록 교체될 확률이 높도록 victim 인덱스를 뽑습니다."""
-    losses = torch.tensor(memory_loss, dtype=torch.float)
-    inv    = 1.0 / (losses + 1e-8)
-    prob   = inv / inv.sum()
-    return torch.multinomial(prob, 1).item()
-
 
 def add_buffer(x_raw, y, t, loss: float):
     """
@@ -306,7 +277,7 @@ def add_buffer(x_raw, y, t, loss: float):
 
     j = random.randint(0, seen_examples - 1)
     if j < memory_capacity:
-        victim = lars_victim() if USE_LARS else j
+        victim = j
         memory_x[victim]       = x_raw
         memory_y[victim]       = y
         memory_teacher[victim] = t
@@ -503,13 +474,9 @@ def train_epoch(data_loader, optimizer) -> float:
         loss_batch_cur = lfn.MSE_loss(Y_pred[is_cur], Y[is_cur])
 
         if USE_REPLAY and is_rep.any():
-            # current(정답) + replay(정답) + replay(teacher distillation)를
-            # 각각 가중합하여 최종 loss를 구성합니다.
             loss_batch_rep = lfn.MSE_loss(Y_pred[is_rep], Y[is_rep])
-            distill_loss   = lfn.MSE_loss(Y_pred[is_rep], Y_t[is_rep])
             total_loss_batch = (ALPHA * loss_batch_cur
-                               + (1 - ALPHA) * loss_batch_rep
-                               + BETA * distill_loss)
+                               + (1 - ALPHA) * loss_batch_rep)
         else:
             total_loss_batch = loss_batch_cur
 
@@ -701,9 +668,8 @@ def generate_csv_tasks(task_configs: List[Tuple]) -> List[Tuple[str, pd.DataFram
     tasks = []
 
     for transmitters, frequency_list, file_name in task_configs:
-        band_label = get_freq_band_label(frequency_list)
         base_name  = file_name.replace(".csv", "")
-        tagged_file_name = f"{base_name}_{band_label}.csv"
+        tagged_file_name = f"{base_name}.csv"
 
         save_path = os.path.join(default_data_path, tagged_file_name)
 
@@ -735,24 +701,21 @@ if __name__ == "__main__":
     for value in values:
         if param == "alpha":
             ALPHA = value
-        elif param == "beta":
-            BETA = value
         elif param == "hidden_dim":
             HIDDEN_DIM = value
         elif param == "layer_num":
             LAYER_NUM = value
         elif param == "freq":
             freq = [value]
-            FREQ_BAND = get_freq_band_label(freq)
 
         # freq가 바뀌면 이 값들도 함께 갱신되어야 합니다. freq가 아닌
         # 다른 파라미터를 스윕할 때는 freq/FREQ_BAND가 그대로이므로 아래
         # 재계산은 매번 수행해도 항상 안전합니다(변경이 없으면 동일한
         # 값으로 다시 채워질 뿐입니다).
-        default_data_path = f"MLP/DATA/{FREQ_BAND}"
+        default_data_path = f"MLP/DATA/"
         task_configs = build_task_configs(freq)
 
-        save = f"{SWEEP_TAG}_alpha{ALPHA}_beta{BETA}_hd{HIDDEN_DIM}_layer{LAYER_NUM}_{FREQ_BAND}"
+        save = f"{SWEEP_TAG}_alpha{ALPHA}_hd{HIDDEN_DIM}_layer{LAYER_NUM}"
         if os.path.exists(os.path.join(save_model_dir, f"results_{save}.csv")):
             data = pd.read_csv(os.path.join(save_model_dir, f"results_{save}.csv"))
             if "sweep_tag" in data.columns and data["sweep_tag"].iloc[0] == SWEEP_TAG:
@@ -813,12 +776,10 @@ if __name__ == "__main__":
         run_meta = {
             "run_name":   save,
             "sweep_tag":  SWEEP_TAG,
-            "use_scaling": USE_SCALING,
+            "use_replay": USE_REPLAY,
             "alpha":      ALPHA,
-            "beta":       BETA,
             "hidden_dim": HIDDEN_DIM,
             "layer_num":  LAYER_NUM,
-            "freq_band":  FREQ_BAND,
         }
 
         # ── validation 결과 CSV 저장 ─────────────────────────────────────

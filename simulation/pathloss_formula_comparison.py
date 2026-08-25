@@ -157,7 +157,7 @@ def _plot(df: pd.DataFrame, freq_band: str) -> None:
 
     ax.set_xticks(x)
     ax.set_xticklabels(df["task"], rotation=60, ha="right", fontsize=8)
-    ax.set_ylabel("RMSE (낮을수록 좋음)")
+    ax.set_ylabel("RMSE")
     ax.set_title(f"Log-distance formula vs MLP+ER - {freq_band}")
     ax.legend()
     fig.tight_layout()

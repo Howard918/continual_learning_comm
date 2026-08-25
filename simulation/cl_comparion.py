@@ -119,7 +119,7 @@ def compute_avg_loss_plain(model, loader: DataLoader) -> float:
 
 
 # ── EWC ────────────────────────────────────────────────────────────
-LAMBDA_EWC = 1000.0  # 정규화 강도. 너무 크면 새 태스크 학습이 거의 안 되고,
+LAMBDA_EWC = 600.0  # 정규화 강도. 너무 크면 새 태스크 학습이 거의 안 되고,
                      # 너무 작으면 정규화 효과가 사라져 Naive와 비슷해집니다.
 
 
@@ -129,8 +129,7 @@ def compute_fisher(model, loader: DataLoader) -> Dict[str, torch.Tensor]:
     계산합니다. 정확한 Fisher(로그우도의 2차 미분의 기댓값) 대신,
     "loss의 그래디언트 제곱의 평균"을 사용하는 empirical Fisher 근사를
     사용합니다(EWC 논문 및 다수 구현체에서 널리 쓰이는 근사법). 이
-    값이 클수록 그 파라미터가 이번 태스크의 예측에 민감하게 관여했다는
-    뜻이므로, 다음 태스크 학습 시 적게 바꾸도록 페널티를 줍니다.
+    값이 클수록 그 파라미t티를 줍니다.
     """
     model.eval()
     fisher = {n: torch.zeros_like(p) for n, p in model.named_parameters()}
@@ -176,7 +175,7 @@ def train_epoch_ewc(model, loader, optimizer,
 
 
 # ── LwF ────────────────────────────────────────────────────────────
-LAMBDA_LWF = 1.0  # distillation loss 가중치. main.py의 BETA(리플레이
+LAMBDA_LWF = 0.6  # distillation loss 가중치. main.py의 BETA(리플레이
                   # distillation 가중치)와 같은 역할을 하는 값입니다.
 
 
@@ -419,7 +418,7 @@ def plot_cl_comparison(df: pd.DataFrame, freq_band: str) -> None:
     avg_by_method = final_df.groupby("method")["mse"].mean().sort_values()
     axes[0].bar(avg_by_method.index.astype(str), avg_by_method.values)
     axes[0].set_title(f"Average Accuracy (final MSE) - {freq_band}")
-    axes[0].set_ylabel("MSE (낮을수록 좋음)")
+    axes[0].set_ylabel("MSE")
 
     # (우) 태스크별, stage 진행에 따른 forgetting 곡선(첫 번째 태스크 기준):
     # 네 방법이 이후 태스크들을 학습하는 동안 "가장 먼저 배운 태스크"의
@@ -430,7 +429,7 @@ def plot_cl_comparison(df: pd.DataFrame, freq_band: str) -> None:
         sub = df[(df["method"] == method) & (df["eval_task"] == first_task)].sort_values("stage")
         axes[1].plot(sub["stage"], sub["mse"], marker="o", label=method)
     axes[1].set_title(f"Forgetting curve on first task ({first_task})")
-    axes[1].set_xlabel("Stage (학습을 마친 태스크 수)")
+    axes[1].set_xlabel("Stage (Trained Task Index)")
     axes[1].set_ylabel("MSE on first task's test set")
     axes[1].legend()
 

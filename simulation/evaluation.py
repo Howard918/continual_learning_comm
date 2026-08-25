@@ -233,7 +233,7 @@ def plot_test_by_task(run_name: str, metric: str = "mse"):
 # ════════════════════════════════════════════════════════════════════
 # c. Alpha / Beta 스윕 비교
 # ════════════════════════════════════════════════════════════════════
-def plot_hyperparam_sweep(param: str, fixed: dict, metric: str = "mse",
+def plot_hyperparam_sweep(param: str, metric: str = "mse",
                           sweep_tag: Optional[str] = None):
     """
     param(alpha 또는 beta)의 값을 바꿔가며 실행한 여러 run들을 비교합니다.
@@ -249,11 +249,8 @@ def plot_hyperparam_sweep(param: str, fixed: dict, metric: str = "mse",
     """
     df = load_all_results(sweep_tag=sweep_tag)
 
-    for key, val in fixed.items():
-        df = _filter_eq(df, key, val)
-
     if df.empty:
-        print(f"[경고] {param} 스윕: sweep_tag={sweep_tag}, fixed={fixed} "
+        print(f"[경고] {param} 스윕: sweep_tag={sweep_tag}"
              f"조건에 맞는 결과가 없습니다.")
         return
 
@@ -273,21 +270,18 @@ def plot_hyperparam_sweep(param: str, fixed: dict, metric: str = "mse",
 
     ax.set_xlabel(L("학습 순서 (Stage)", "Training Stage"))
     ax.set_ylabel(metric.upper())
-    fixed_str = ", ".join(f"{k}={v}" for k, v in fixed.items())
-    ax.set_title(L(f"{param} 값에 따른 Test {metric.upper()} 비교 ({fixed_str} 고정)",
-                   f"Test {metric.upper()} by {param} (fixed {fixed_str})"))
+    ax.set_title(L(f"{param} 값에 따른 Test {metric.upper()} 비교",
+                   f"Test {metric.upper()} by {param}"))
     ax.legend(title=param)
     ax.grid(alpha=0.3)
 
-    _save(fig, f"c_{param}_sweep_{metric}({fixed_str}).png")
+    _save(fig, f"c_{param}_sweep_{metric}.png")
 
 
 def plot_alpha_beta_sweep(metric: str = "mse"):
     """alpha 스윕과 beta 스윕을 각각 그립니다."""
-    plot_hyperparam_sweep("alpha", fixed={"beta": 0.0}, metric=metric,
+    plot_hyperparam_sweep("alpha", metric=metric,
                           sweep_tag="alpha_sweep")
-    plot_hyperparam_sweep("beta",  fixed={"alpha": 0.3}, metric=metric,
-                          sweep_tag="beta_sweep")
 
 
 # ════════════════════════════════════════════════════════════════════
