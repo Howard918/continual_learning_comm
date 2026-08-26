@@ -23,9 +23,9 @@ import matplotlib.font_manager as fm
 
 
 # ---- 입력 파일 경로 (필요시 수정) ----
-ER_CSV = "results_ER_2_sweep_alpha0.5_hd64_layer2.csv"
-NOER_CSV = "results_MLP_2_sweep_alpha0.5_hd64_layer2.csv"
-OUTPUT_PNG = "2_first_task_er_vs_noer.png"
+ER_CSV = "results_ER_5_sweep_alpha0.5_hd64_layer2.csv"
+NOER_CSV = "results_MLP_5_sweep_alpha0.5_hd64_layer2.csv"
+OUTPUT_PNG = "5_first_task_er_vs_noer.png"
 
 
 def load_first_task_curve(csv_path: str) -> pd.DataFrame:

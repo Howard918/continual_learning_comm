@@ -397,7 +397,7 @@ if __name__ == "__main__":
 
     # a, b: 단일 run에 대한 태스크별 breakdown.
     # new_main.py의 `save` 변수와 동일한 값을 지정해야 합니다.
-    TARGET_RUN_NAME = "alpha_sweep_alpha0.5_beta0.7_hd64_layer2_LTE_2.1G"
+    TARGET_RUN_NAME = "ER_5_sweep_alpha0.5_hd64_layer2"
 
     plot_validation_by_task(TARGET_RUN_NAME)
     plot_test_by_task(TARGET_RUN_NAME, metric="mse")

@@ -85,9 +85,9 @@ freq = [900_000_000, 1_800_000_000, 2_100_000_000, 3_500_000_000, 7_125_000_000,
 SWEEP_ALPHA = {"alpha": [0.1, 0.3, 0.5, 0.7, 0.9]}
 SWEEP_HIDDEN_DIM = {"hidden_dim": [16, 32, 64, 128]}
 SWEEP_LAYER_NUM = {"layer_num": [1, 2, 3, 4, 5]}
-NO_SWEEP = {"ER_2": [None]}
+NO_SWEEP = {"MLP_5": [None]}
 
-SWEEP_PARAM = NO_SWEEP  # SWEEP_ALPHA / SWEEP_BETA / SWEEP_HIDDEN_DIM / SWEEP_LAYER_NUM / SWEEP_FREQ_BAND
+SWEEP_PARAM = SWEEP_ALPHA  # SWEEP_ALPHA / SWEEP_BETA / SWEEP_HIDDEN_DIM / SWEEP_LAYER_NUM / SWEEP_FREQ_BAND
 
 # 이번 실행을 구분하는 이름입니다. 여러 하이퍼파라미터 조합으로 반복
 # 실행할 때(evaluation.py에서 결과를 비교하려면) 실행마다 다른 값으로
@@ -138,25 +138,25 @@ target            = "PL"
 # 태스크를 추가하려면 아래 리스트에 항목을 추가하면 됩니다.
 
 
+SBS_Seoul = [Transmitter("SBS_Seoul", 126.87374657727, 37.5291902429029)]
+MBC_Seoul = [Transmitter("MBC_Seoul", 126.890988995582, 37.5811234199086)]
+KBS_Seoul = [Transmitter("KBS_Seoul", 126.916716838156, 37.5259698897016)]
 MBC_CheongJu = [Transmitter("MBC-CheongJu", 127.433977355451, 36.61907632039761)]
 Broad_CheongJu = [Transmitter('Broad-CheongJu', 127.47905459727248, 36.63418678335862)]
+MBC_ChungJu = [Transmitter("MBC-ChungJu", 127.924378514041, 36.9585291745712)]
+KBS_ChungJu = [Transmitter("KBS-ChungJu", 127.920483843397, 36.9724980330778)]
 MBC_DaeJeon = [Transmitter("MBC-DaeJeon", 127.397198121239, 36.3760857047283)]
 KBS_DaeJeon = [Transmitter("KBS-DaeJeon", 127.380567392303, 36.3704437169546)]
 CMB_DaeJeon = [Transmitter("CMB-DaeJeon", 127.419676653034, 36.3341326962576)]
-MBC_ChungJu = [Transmitter("MBC-ChungJu", 127.924378514041, 36.9585291745712)]
-KBS_ChungJu = [Transmitter("KBS-ChungJu", 127.920483843397, 36.9724980330778)]
-KBS_Seoul = [Transmitter("KBS_Seoul", 126.916716838156, 37.5259698897016)]
-SBS_Seoul = [Transmitter("SBS_Seoul", 126.87374657727, 37.5291902429029)]
-MBC_sa = [Transmitter("MBC_sa", 126.890988995582, 37.5811234199086)]
-KBS_KangNeung = [Transmitter("KBS-KangNeung", 128.891256884067, 37.7520385140085)]
-MBC_KangNeung = [Transmitter("MBC-KangNeung", 128.904230376246, 37.7709174571674)]
-TBN_DaeGu = [Transmitter("TBN-DaeGu", 128.580363461352, 35.843420581465)]
-TBC_DaeGu = [Transmitter("TBC-DaeGu", 128.622440960025, 35.8323075963103)]
-JeonJu_Radio = [Transmitter("JeonJu Radio", 127.158316016663, 35.8489105505397)]
 KBS_JeonJu = [Transmitter("KBS-JeonJu", 127.104790219087, 35.8221763698401)]
+JeonJu_Radio = [Transmitter("JeonJu Radio", 127.158316016663, 35.8489105505397)]
+KBS_GwangJu = [Transmitter("KBS-GwangJu", 126.854624825405, 35.1581118750609)]
 KBS_MokPo = [Transmitter("KBS-MokPo", 126.394348103215, 34.8120944953763)]
 KBS_SunCheon = [Transmitter("KBS-SunCheon", 127.48480049784, 34.9683819549619)]
-KBS_GwangJu = [Transmitter("KBS-GwangJu", 126.854624825405, 35.1581118750609)]
+TBN_DaeGu = [Transmitter("TBN-DaeGu", 128.580363461352, 35.843420581465)]
+TBC_DaeGu = [Transmitter("TBC-DaeGu", 128.622440960025, 35.8323075963103)]
+KBS_KangNeung = [Transmitter("KBS-KangNeung", 128.891256884067, 37.7520385140085)]
+MBC_KangNeung = [Transmitter("MBC-KangNeung", 128.904230376246, 37.7709174571674)]
 
 
 def build_task_configs(freq_list: List[int]) -> List[Tuple]:
@@ -167,13 +167,25 @@ def build_task_configs(freq_list: List[int]) -> List[Tuple]:
     분리했습니다.
     """
     return [
+        (SBS_Seoul, freq_list, "SBS_Seoul.csv"),
+        # (MBC_Seoul, freq_list, "MBC_Seoul.csv"),
+        # (KBS_Seoul, freq_list, "KBS_Seoul.csv"),
         (MBC_CheongJu, freq_list, "MBC_CheongJu.csv"),
-        (KBS_DaeJeon, freq_list, "KBS_DaeJeon.csv"),
-        (KBS_Seoul, freq_list, "KBS_Seoul.csv"),
+        # (Broad_CheongJu, freq_list, "Broad_CheongJu.csv"),
         (MBC_ChungJu, freq_list, "MBC_ChungJu.csv"),
-        (KBS_KangNeung, freq_list, "KBS_KangNeung.csv"),
-        (TBN_DaeGu, freq_list, "TBN_DaeGu.csv"),
+        # (KBS_ChungJu, freq_list, "KBS_ChungJu.csv"),
+        (MBC_DaeJeon, freq_list, "MBC_DaeJeon.csv"),
+        # (KBS_DaeJeon, freq_list, "KBS_DaeJeon.csv"),
+        # (CMB_DaeJeon, freq_list, "CMB_DaeJeon.csv"),
+        # (KBS_JeonJu, freq_list, "KBS_JeonJu.csv"),
+        (JeonJu_Radio, freq_list, "JeonJu_Radio.csv"),
+        # (KBS_GwangJu, freq_list, "KBS_GwangJu.csv"),
+        # (KBS_MokPo, freq_list, "KBS_MokPo.csv"),
         (KBS_SunCheon, freq_list, "KBS_SunCheon.csv"),
+        # (TBN_DaeGu, freq_list, "TBN_DaeGu.csv"),
+        (TBC_DaeGu, freq_list, "TBC_DaeGu.csv"),
+        (KBS_KangNeung, freq_list, "KBS_KangNeung.csv"),
+        # (MBC_KangNeung, freq_list, "MBC_KangNeung.csv"),
     ]
 
 
